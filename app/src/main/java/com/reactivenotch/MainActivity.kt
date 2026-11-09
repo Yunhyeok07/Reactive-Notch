@@ -27,7 +27,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -57,11 +56,18 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.reactivenotch.share.DropPermissionHost
 
 class MainActivity : ComponentActivity() {
+    override fun onDestroy() {
+        if (DropPermissionHost.activity?.get() === this) DropPermissionHost.activity = null
+        super.onDestroy()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         SettingsStore.init(this)
+        DropPermissionHost.activity = java.lang.ref.WeakReference(this)
         setContent {
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize()) { SettingsScreen() }
@@ -157,13 +163,11 @@ private fun SettingsScreen() {
         Text("기능", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         ToggleRow("음악 재생 표시", settings.showMedia) { v -> SettingsStore.update { it.copy(showMedia = v) } }
         ToggleRow("이어폰 슬라이드", settings.showEarbuds) { v -> SettingsStore.update { it.copy(showEarbuds = v) } }
-        ToggleRow("아래로 쓸어내려 제미나이 실행", settings.swipeGemini) { v -> SettingsStore.update { it.copy(swipeGemini = v) } }
-        if (settings.swipeGemini) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(settings.geminiMode == GeminiMode.APP, { SettingsStore.update { it.copy(geminiMode = GeminiMode.APP) } }, { Text("제미나이 앱") })
-                FilterChip(settings.geminiMode == GeminiMode.ASSISTANT, { SettingsStore.update { it.copy(geminiMode = GeminiMode.ASSISTANT) } }, { Text("기본 어시스턴트") })
-            }
-        }
+        ToggleRow("드래그 앤 드롭 공유", settings.shareDrop) { v -> SettingsStore.update { it.copy(shareDrop = v) } }
+        Text(
+            "파일·이미지·텍스트·링크를 끌어서 노치에 놓으면 공유 창(Quick Share 포함)이 열립니다. 파일이 공유되지 않으면 이 앱을 최근 앱 목록에 열어 둔 채로 시도해 보세요. 결과는 아래 로그에 [drag] 로 남습니다.",
+            fontSize = 12.sp,
+        )
         Text("섬 크기 ${"%.0f".format(settings.scale * 100)}%", fontSize = 14.sp)
         Slider(settings.scale, { v -> SettingsStore.update { it.copy(scale = v) } }, valueRange = 0.8f..1.3f)
 

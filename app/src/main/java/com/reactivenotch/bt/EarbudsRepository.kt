@@ -182,7 +182,6 @@ class EarbudsRepository(
     @SuppressLint("MissingPermission")
     private suspend fun connectAndRead(device: BluetoothDevice) {
         val socket: BluetoothSocket = device.createRfcommSocketToServiceRecord(SONY_UUID)
-        adapter?.cancelDiscovery()
         try {
             socket.connect()
             DebugLog.add("sony", "RFCOMM 연결됨: ${device.name}")

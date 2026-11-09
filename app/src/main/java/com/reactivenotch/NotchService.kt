@@ -6,11 +6,14 @@ import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
 import android.view.Display
+import android.view.DragEvent
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.widget.FrameLayout
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,9 +37,13 @@ import com.reactivenotch.bt.EarbudsRepository
 import com.reactivenotch.media.MediaRepository
 import com.reactivenotch.ui.IslandRoot
 import com.reactivenotch.ui.MediaActions
+import com.reactivenotch.share.DropPermissionHost
+import com.reactivenotch.share.DropShare
 import com.reactivenotch.ui.NotchGeometry
+import com.reactivenotch.ui.ShareDragState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -61,7 +68,7 @@ class NotchService : AccessibilityService(), LifecycleOwner, SavedStateRegistryO
     private lateinit var media: MediaRepository
     private lateinit var earbuds: EarbudsRepository
 
-    private var view: ComposeView? = null
+    private var view: NotchRoot? = null
     private var params: WindowManager.LayoutParams? = null
     private var attached = false
 
@@ -69,6 +76,10 @@ class NotchService : AccessibilityService(), LifecycleOwner, SavedStateRegistryO
     private var expanded by mutableStateOf(false)
     private var mediaAccess by mutableStateOf(false)
     private var statusBarVisible by mutableStateOf(true)
+    private var dragActive by mutableStateOf(false)
+    private var dragHover by mutableStateOf(false)
+    private var dropMessage by mutableStateOf<String?>(null)
+    private var dragResetJob: Job? = null
 
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = Unit
@@ -124,28 +135,36 @@ class NotchService : AccessibilityService(), LifecycleOwner, SavedStateRegistryO
         }
     }
 
-    private fun buildView(): ComposeView = ComposeView(this).apply {
-        setViewTreeLifecycleOwner(this@NotchService)
-        setViewTreeSavedStateRegistryOwner(this@NotchService)
-        setViewTreeViewModelStoreOwner(this@NotchService)
+    /** 드래그 이벤트를 자식(Compose)보다 먼저 받기 위한 루트. */
+    private class NotchRoot(context: android.content.Context, val onDrag: (DragEvent) -> Boolean) : FrameLayout(context) {
+        override fun dispatchDragEvent(event: DragEvent): Boolean = onDrag(event)
+    }
 
-        ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
+    private fun buildView(): NotchRoot {
+        val root = NotchRoot(this, ::handleDrag)
+        root.setViewTreeLifecycleOwner(this)
+        root.setViewTreeSavedStateRegistryOwner(this)
+        root.setViewTreeViewModelStoreOwner(this)
+
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             statusBarVisible = insets.isVisible(WindowInsetsCompat.Type.statusBars())
             insets
         }
         // 창 밖을 누르면 접는다 (FLAG_WATCH_OUTSIDE_TOUCH).
-        setOnTouchListener { _, e ->
+        root.setOnTouchListener { _, e ->
             if (e.action == MotionEvent.ACTION_OUTSIDE) changeExpanded(false)
             false
         }
 
-        setContent {
+        val compose = ComposeView(this)
+        root.addView(compose, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        compose.setContent {
             val settings by SettingsStore.state.collectAsState()
             val track by media.track.collectAsState()
             val buds by earbuds.state.collectAsState()
             val geo = geometry
             val hiddenByFullscreen = settings.hideInFullscreen && !statusBarVisible
-            SideEffect { visibility = if (hiddenByFullscreen) View.INVISIBLE else View.VISIBLE }
+            SideEffect { root.visibility = if (hiddenByFullscreen) View.INVISIBLE else View.VISIBLE }
 
             if (geo != null) {
                 IslandRoot(
@@ -156,16 +175,73 @@ class NotchService : AccessibilityService(), LifecycleOwner, SavedStateRegistryO
                     settings = settings,
                     expanded = expanded,
                     onExpandedChange = ::changeExpanded,
+                    share = ShareDragState(dragActive, dragHover, dropMessage),
                     onWindowSize = ::resizeWindow,
-                    onSwipeDown = {
-                        changeExpanded(false)
-                        Gemini.launch(this@NotchService, settings.geminiMode)
-                    },
                     mediaActions = MediaActions(media::playPause, media::next, media::previous, media::seekTo),
                     onSetNoise = earbuds::setNoise,
                 )
             }
         }
+        return root
+    }
+
+    /** 다른 앱에서 끌어온 항목을 받는다 (소스 앱이 DRAG_FLAG_GLOBAL 로 시작한 드래그만 도착한다). */
+    private fun handleDrag(e: DragEvent): Boolean {
+        if (!SettingsStore.state.value.shareDrop || geometry == null) return false
+        when (e.action) {
+            DragEvent.ACTION_DRAG_STARTED -> {
+                DebugLog.add("drag", "시작 mime=${e.clipDescription?.filterMimeTypes("*/*")?.toList()}")
+                dragActive = true
+                dragHover = false
+                dropMessage = null
+                expanded = false
+                // 끝 이벤트를 못 받는 경우를 대비한 안전장치
+                dragResetJob?.cancel()
+                dragResetJob = scope.launch {
+                    delay(120_000)
+                    resetDrag()
+                }
+                return true
+            }
+            DragEvent.ACTION_DRAG_ENTERED -> dragHover = true
+            DragEvent.ACTION_DRAG_EXITED -> dragHover = false
+            DragEvent.ACTION_DROP -> {
+                handleDrop(e)
+                return true
+            }
+            DragEvent.ACTION_DRAG_ENDED -> {
+                DebugLog.add("drag", "끝 (처리됨=${e.result})")
+                if (dropMessage == null) resetDrag()
+            }
+        }
+        return true
+    }
+
+    private fun handleDrop(e: DragEvent) {
+        val clip = e.clipData
+        DebugLog.add("drag", "드롭 clip=${if (clip == null) "null" else "${clip.itemCount}개"}")
+        dragHover = false
+        if (clip == null) {
+            showDropMessage("내용을 읽을 수 없어요")
+            return
+        }
+        DropPermissionHost.acquire(e)
+        showDropMessage(if (DropShare.share(this, clip)) "공유 창을 여는 중…" else "공유할 수 없는 항목이에요")
+    }
+
+    private fun showDropMessage(text: String) {
+        dropMessage = text
+        dragResetJob?.cancel()
+        dragResetJob = scope.launch {
+            delay(1_100)
+            resetDrag()
+        }
+    }
+
+    private fun resetDrag() {
+        dragActive = false
+        dragHover = false
+        dropMessage = null
     }
 
     private fun changeExpanded(value: Boolean) {

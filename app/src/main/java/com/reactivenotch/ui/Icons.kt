@@ -13,7 +13,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 
-enum class IconKind { PLAY, PAUSE, NEXT, PREV, HEADPHONES }
+enum class IconKind { PLAY, PAUSE, NEXT, PREV, HEADPHONES, SHARE }
 
 @Composable
 fun GlyphIcon(kind: IconKind, tint: Color, size: Dp, modifier: Modifier = Modifier) {
@@ -38,6 +38,17 @@ fun GlyphIcon(kind: IconKind, tint: Color, size: Dp, modifier: Modifier = Modifi
             IconKind.PREV -> {
                 drawPath(tri(0.88f, 0.28f), tint)
                 drawRoundRect(tint, Offset(w * 0.11f, h * 0.18f), Size(w * 0.13f, h * 0.64f), CornerRadius(w * 0.04f))
+            }
+            IconKind.SHARE -> {
+                val a = Offset(w * 0.25f, h * 0.5f)
+                val b = Offset(w * 0.75f, h * 0.2f)
+                val c = Offset(w * 0.75f, h * 0.8f)
+                val line = w * 0.07f
+                drawLine(tint, a, b, line, StrokeCap.Round)
+                drawLine(tint, a, c, line, StrokeCap.Round)
+                drawCircle(tint, w * 0.13f, a)
+                drawCircle(tint, w * 0.13f, b)
+                drawCircle(tint, w * 0.13f, c)
             }
             IconKind.HEADPHONES -> {
                 val stroke = Stroke(width = w * 0.09f, cap = StrokeCap.Round)

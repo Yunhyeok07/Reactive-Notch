@@ -72,7 +72,7 @@ fun AlbumArt(track: Track?, size: Dp, corner: Dp) {
 }
 
 @Composable
-fun Bars(playing: Boolean, color: Color, modifier: Modifier = Modifier) {
+fun Bars(playing: Boolean, color: Color, modifier: Modifier = Modifier, barHeight: Dp = 18.dp) {
     val t = rememberInfiniteTransition(label = "bars")
     val scales = List(4) { i ->
         t.animateFloat(
@@ -83,13 +83,13 @@ fun Bars(playing: Boolean, color: Color, modifier: Modifier = Modifier) {
         )
     }
     androidx.compose.foundation.layout.Row(
-        modifier.height(18.dp),
+        modifier.height(barHeight),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         scales.forEach { s ->
             Box(
-                Modifier.width(3.dp).height(18.dp)
+                Modifier.width(3.dp).height(barHeight)
                     .graphicsLayer { scaleY = if (playing) s.value else 0.25f }
                     .background(color, RoundedCornerShape(2.dp)),
             )
