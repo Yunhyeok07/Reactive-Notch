@@ -33,7 +33,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -53,6 +59,9 @@ enum class IslandMode { IDLE, COMPACT, EXPANDED }
 
 /** 창이 섬보다 약간 커야 스프링 오버슈트가 잘리지 않는다. */
 val WindowMargin = 12.dp
+
+/** 실제 탭 노치처럼 위쪽 모서리가 바깥으로 부드럽게 벌어지는 정도. */
+private val NotchFlare = 12.dp
 
 private const val AUTO_COLLAPSE_MS = 12_000L
 private const val SHRINK_DELAY_MS = 450L
@@ -125,7 +134,7 @@ fun IslandRoot(
         Box(
             Modifier
                 .size(w, h)
-                .clip(RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp, bottomStart = radius, bottomEnd = radius))
+                .clip(NotchShape(flare = NotchFlare, bottomRadius = radius))
                 .background(Color.Black.copy(alpha = fillAlpha))
                 .pointerInput(Unit) {
                     awaitPointerEventScope {
@@ -211,5 +220,30 @@ private fun ExpandedContent(
                 }
             }
         }
+    }
+}
+
+/**
+ * 화면 위쪽 가장자리에 붙은 노치 모양: 위쪽 모서리는 오목하게 벌어지고(귀),
+ * 아래쪽 모서리만 둥글다. 전체 폭 안에서 몸통은 좌우로 [flare] 만큼 안쪽에 있다.
+ */
+class NotchShape(private val flare: Dp, private val bottomRadius: Dp) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val w = size.width
+        val h = size.height
+        val f = with(density) { flare.toPx() }.coerceAtMost(w / 4f).coerceAtMost(h / 2f)
+        val r = with(density) { bottomRadius.toPx() }.coerceAtMost((w - 2 * f) / 2f).coerceAtMost(h - f).coerceAtLeast(0f)
+        val path = Path().apply {
+            moveTo(0f, 0f)
+            quadraticBezierTo(f, 0f, f, f)
+            lineTo(f, h - r)
+            quadraticBezierTo(f, h, f + r, h)
+            lineTo(w - f - r, h)
+            quadraticBezierTo(w - f, h, w - f, h - r)
+            lineTo(w - f, f)
+            quadraticBezierTo(w - f, 0f, w, 0f)
+            close()
+        }
+        return Outline.Generic(path)
     }
 }

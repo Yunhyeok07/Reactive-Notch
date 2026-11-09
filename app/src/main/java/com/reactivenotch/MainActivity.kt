@@ -99,6 +99,7 @@ private fun SettingsScreen() {
     val batteryOn = context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)
 
     val settings by SettingsStore.state.collectAsState()
+    val overlay by NotchStatus.state.collectAsState()
     val log by DebugLog.lines.collectAsState()
 
     Column(
@@ -110,6 +111,24 @@ private fun SettingsScreen() {
             "갤럭시 탭 노치를 다이내믹 아일랜드처럼 쓰는 앱입니다. 가로 모드에서 카메라 노치가 위쪽에 있을 때만 동작하고, 세로 모드에서는 자동으로 꺼집니다.",
             fontSize = 13.sp,
         )
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("현재 상태", fontWeight = FontWeight.SemiBold)
+                Text("서비스: " + if (overlay.serviceRunning) "실행 중" else "꺼짐 (접근성 서비스를 켜 주세요)", fontSize = 13.sp)
+                Text(
+                    "노치: " + (overlay.notch?.let { "감지됨 ($it)" }
+                        ?: "감지 안 됨 — 탭을 가로로 돌려 노치가 위로 오게 하세요"),
+                    fontSize = 13.sp,
+                )
+                Text("섬 창: " + if (overlay.overlayAttached) "표시 중" else "없음", fontSize = 13.sp)
+                Text("음악: " + (overlay.mediaTrack ?: "감지된 재생 없음"), fontSize = 13.sp)
+                Text("평소(대기) 상태의 섬은 노치와 같은 검은색이라 보이지 않습니다. 음악이 재생되면 노치 양옆에 나타납니다.", fontSize = 12.sp)
+                if (overlay.overlayAttached) {
+                    OutlinedButton({ NotchStatus.expandHandler?.invoke() }) { Text("섬 열어보기") }
+                }
+            }
+        }
 
         StepCard(
             "1. 접근성 서비스 켜기", accessibilityOn,

@@ -43,6 +43,7 @@ class MediaRepository(private val context: Context) {
     val track: StateFlow<Track?> = _track
 
     private var registered = false
+    val isRegistered: Boolean get() = registered
     private var controllers: List<MediaController> = emptyList()
     private var current: MediaController? = null
 

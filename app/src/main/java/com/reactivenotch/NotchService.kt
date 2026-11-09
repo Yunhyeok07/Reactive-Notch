@@ -39,6 +39,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * 접근성 서비스는 "상태바/컷아웃 위에 창을 그릴 수 있는" TYPE_ACCESSIBILITY_OVERLAY 때문에 쓴다.
@@ -98,7 +100,28 @@ class NotchService : AccessibilityService(), LifecycleOwner, SavedStateRegistryO
 
         media.ensureStarted()
         earbuds.start()
+        NotchStatus.expandHandler = { changeExpanded(true) }
+        NotchStatus.update { it.copy(serviceRunning = true) }
         refreshGeometry()
+
+        scope.launch {
+            media.track.collect { t ->
+                val text = t?.let { "${it.title} (${if (it.playing) "재생 중" else "일시정지"})" }
+                NotchStatus.update { it.copy(mediaTrack = text) }
+            }
+        }
+        // 알림 접근/블루투스 권한은 서비스가 켜진 뒤에 허용될 수 있으므로, 허용되는 순간 시작한다.
+        scope.launch {
+            var btGranted = earbuds.hasPermission()
+            while (true) {
+                delay(3_000)
+                if (!media.isRegistered) media.ensureStarted()
+                if (!btGranted && earbuds.hasPermission()) {
+                    btGranted = true
+                    earbuds.refresh()
+                }
+            }
+        }
     }
 
     private fun buildView(): ComposeView = ComposeView(this).apply {
@@ -163,11 +186,13 @@ class NotchService : AccessibilityService(), LifecycleOwner, SavedStateRegistryO
             geometry = null
             expanded = false
             detach()
+            NotchStatus.update { it.copy(notch = null, overlayAttached = false) }
             return
         }
         val geo = NotchGeometry(rect.centerX(), rect.width(), rect.height())
         if (geo != geometry) geometry = geo
         attach(geo)
+        NotchStatus.update { it.copy(notch = "폭 ${geo.widthPx}px × 높이 ${geo.heightPx}px", overlayAttached = attached) }
     }
 
     private fun attach(geo: NotchGeometry) {
@@ -241,6 +266,8 @@ class NotchService : AccessibilityService(), LifecycleOwner, SavedStateRegistryO
     }
 
     private fun teardown() {
+        NotchStatus.expandHandler = null
+        NotchStatus.update { OverlayStatus() }
         if (::displayManager.isInitialized) displayManager.unregisterDisplayListener(displayListener)
         detach()
         if (::media.isInitialized) media.stop()
